@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = None  # Remove file size limit
 
+# Get temp directory from environment variable or use system default
+TEMP_DIR = os.environ.get('TEMP_DIR', None)
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -27,7 +30,8 @@ def merge_videos():
     if not zip_file or not zip_file.filename.endswith('.zip'):
         return jsonify({'error': 'Invalid file type'}), 400
 
-    temp_dir = tempfile.mkdtemp()
+    # Use custom temp directory if specified, otherwise use system default
+    temp_dir = tempfile.mkdtemp(dir=TEMP_DIR)
     logger.debug(f"Created temporary directory: {temp_dir}")
     zip_path = os.path.join(temp_dir, 'uploaded.zip')
     zip_file.save(zip_path)
@@ -94,7 +98,15 @@ def merge_videos():
     # Run ffmpeg
     subprocess.run([
         'ffmpeg', '-f', 'concat', '-safe', '0',
-        '-i', filelist_path, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', output_path
+        '-i', filelist_path,
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-fflags', '+genpts+igndts',  # Generate new PTS and ignore DTS
+        '-fps_mode', 'cfr',           # Use constant frame rate mode
+        '-max_interleave_delta', '0', # Reduce interleaving delay
+        '-movflags', '+faststart',    # Enable fast start for web playback
+        output_path
     ], check=True)
 
     return send_file(output_path, as_attachment=True)
